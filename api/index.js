@@ -1,104 +1,93 @@
-// TeraBox API - api/index.js
+// api/index.js
 module.exports = async (req, res) => {
-  // CORS Setup
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const url = req.query.url || req.body?.url;
+  let url = req.query.url || req.body?.url;
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL parameter is required' });
-  }
+  if (!url) return res.status(400).json({ error: 'URL is required' });
 
   try {
-    // 1. Fetch the HTML page content (More reliable than /api/shorturlinfo on serverless)
-    // We scrape the HTML to get the Auth Keys (sign, timestamp) which are REQUIRED for client-side download.
-    const cookieString = buildCookieString();
-    
+    // 1. FIX: Normalize URL to terabox.com
+    // 1024terabox links often fail scraping tools.
+    url = url.replace(/(1024terabox|teraboxapp|terabox)\.com/, 'terabox.com');
+
+    // 2. Extract the Short Code (needed for fallback)
+    const shortCodeMatch = url.match(/\/s\/([a-zA-Z0-9_-]+)/);
+    const shortCode = shortCodeMatch ? shortCodeMatch[1] : null;
+
+    console.log(`Fetching: ${url}`);
+
+    // 3. Fetch HTML WITHOUT Cookies first
+    // Sending 'ndus' cookies from a Vercel IP often triggers a "Security Verification" page.
     const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Cookie': cookieString
         }
     });
 
-    if (!response.ok) {
-        throw new Error(`Failed to fetch page: ${response.status}`);
-    }
-
+    // Check if we got a valid response
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
     const html = await response.text();
 
-    // 2. Extract window.yunData (Contains all file info + Auth keys)
-    const match = html.match(/window\.yunData\s*=\s*({.+?});/);
+    // Debug: Check if we got the Captcha page
+    if (html.includes('security-check') || html.includes('spam-protection')) {
+        return res.status(403).json({ error: 'TeraBox blocked Vercel IP (Captcha triggered). Try using a residential proxy.' });
+    }
+
+    // 4. Regex: Try standard yunData
+    let match = html.match(/window\.yunData\s*=\s*({.+?});/);
     
+    // 4b. Regex: Fallback (Sometimes data is in 'init' function)
     if (!match) {
-        return res.status(500).json({ error: 'Could not extract data from TeraBox. Link might be invalid or password protected.' });
+        match = html.match(/yunData\.setData\(({.+?})\);/);
+    }
+
+    if (!match) {
+        console.log("HTML Preview:", html.substring(0, 500)); // Log for debugging
+        return res.status(500).json({ error: 'Could not extract data. TeraBox layout changed or IP blocked.' });
     }
 
     const data = JSON.parse(match[1]);
-    
-    // Check if files exist
+
     if (!data.file_list || data.file_list.length === 0) {
-      return res.status(404).json({ error: 'No files found' });
+      return res.status(404).json({ error: 'No files found in this link' });
     }
 
-    // 3. Format the response for the Client
-    // We do NOT call /api/download here. We send the ingredients to the client.
-    const files = data.file_list.map((file) => {
-        return {
-          filename: file.server_filename,
-          size: file.size,
-          sizeFormatted: formatBytes(file.size),
-          // Thumbs are usually safe to fetch directly
-          thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || null,
-          fs_id: file.fs_id, // CRITICAL: Client needs this
-          category: file.category,
-          isDir: file.isdir
-        };
-    });
+    // 5. Send Data to Client
+    const files = data.file_list.map((file) => ({
+        filename: file.server_filename,
+        size: file.size,
+        sizeFormatted: formatBytes(file.size),
+        thumbnail: file.thumbs?.url3 || null,
+        fs_id: file.fs_id, // Vital for client-side fetch
+        isDir: file.isdir
+    }));
 
-    // 4. Send keys + File list to Client
     res.json({
       success: true,
       share_data: {
-        shorturl: url.split('/').pop(), // extract shorturl code
+        shorturl: shortCode, 
         uk: data.uk,
         shareid: data.shareid,
         sign: data.sign,
         timestamp: data.timestamp,
-        jsToken: data.jsToken // Often required for the download API
+        jsToken: data.jsToken 
       },
-      totalFiles: files.length,
       files: files
     });
 
   } catch (error) {
-    console.error('API Error:', error);
-    res.status(500).json({ 
-      error: 'Server error',
-      message: error.message 
-    });
+    console.error(error);
+    res.status(500).json({ error: 'Server Error', details: error.message });
   }
 };
-
-function buildCookieString() {
-  const cookies = {
-    'csrfToken': '2fzTRpNb-HTGQgrg8iZYpt8F',
-    'browserid': '6t2WAvN8Xo6f5aZEYD9XH5OajsohgdT9GaluTpOr5ZqwUQJIcwuSZ6Hpmqk=',
-    'lang': 'en',
-    'ndus': 'Y-Q-Sg3teHuiJs2mPAKP11cWWr_mWKJkOtPCFB8T',
-    // 'ndut_fmt': '...' // Add if necessary
-  };
-  
-  return Object.entries(cookies)
-    .map(([key, value]) => `${key}=${value}`)
-    .join('; ');
-}
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
