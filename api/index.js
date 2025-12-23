@@ -61,6 +61,7 @@ module.exports = async (req, res) => {
     // Try to get download links from share/list endpoint first (more reliable)
     let shareListData = null;
     try {
+      // Try share/list endpoint - this sometimes has download links
       const shareListRes = await fetch(
         `https://www.terabox.com/share/list?app_id=250528&web=1&channel=chunlei&clienttype=0&shorturl=${shorturl}&root=1`,
         {
@@ -75,6 +76,29 @@ module.exports = async (req, res) => {
         }
       );
       shareListData = await shareListRes.json();
+      
+      // If share/list doesn't work, try the same endpoint but with different parameters
+      if (!shareListData?.list || shareListData.errno !== 0) {
+        try {
+          const altShareListRes = await fetch(
+            `https://www.terabox.com/api/share/list?app_id=250528&web=1&channel=chunlei&clienttype=0&shorturl=${shorturl}&root=1`,
+            {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Referer': `https://www.terabox.com/s/${shorturl}`,
+                'Cookie': cookieString
+              }
+            }
+          );
+          const altData = await altShareListRes.json();
+          if (altData.list && altData.errno === 0) {
+            shareListData = altData;
+          }
+        } catch (altErr) {
+          // Ignore alternative endpoint failure
+        }
+      }
       // #region agent log
       console.log('[HYPOTHESIS-A] share/list response:', JSON.stringify({
         hasData: !!shareListData,
@@ -175,11 +199,13 @@ module.exports = async (req, res) => {
           }
           
           // Method 3: Try download API endpoint (if share/list didn't work)
+          // Try GET first, then POST if GET fails
           if (!dlink) {
             debugInfo.method3_downloadAPI.tried = true;
             try {
               const timestamp = Date.now();
-              const dlRes = await fetch(
+              // Try GET request first
+              let dlRes = await fetch(
                 `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=${timestamp}&app_id=250528`,
                 {
                   headers: {
@@ -193,8 +219,9 @@ module.exports = async (req, res) => {
                 }
               );
               
-              const dlData = await dlRes.json();
+              let dlData = await dlRes.json();
               debugInfo.method3_downloadAPI.data = {
+                method: 'GET',
                 errno: dlData.errno,
                 errmsg: dlData.errmsg || dlData.error_msg,
                 hasList: !!dlData.list,
@@ -204,8 +231,55 @@ module.exports = async (req, res) => {
                 responseKeys: Object.keys(dlData).slice(0, 15)
               };
               // #region agent log
-              console.log('[HYPOTHESIS-C] Method 3 - download API response:', JSON.stringify(debugInfo.method3_downloadAPI.data));
+              console.log('[HYPOTHESIS-C] Method 3 GET - download API response:', JSON.stringify(debugInfo.method3_downloadAPI.data));
               // #endregion
+              
+              // If GET fails with error 2, try POST method
+              if ((dlData.errno === 2 || dlData.errno !== 0) && dlData.errno !== undefined) {
+                try {
+                  const postParams = new URLSearchParams({
+                    'fid_list': `[${file.fs_id}]`,
+                    'shorturl': shorturl,
+                    'sign': '',
+                    'timestamp': timestamp.toString(),
+                    'app_id': '250528'
+                  });
+                  
+                  dlRes = await fetch(
+                    `https://www.terabox.com/api/download`,
+                    {
+                      method: 'POST',
+                      headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/json, text/plain, */*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Referer': `https://www.terabox.com/s/${shorturl}`,
+                        'Origin': 'https://www.terabox.com',
+                        'Cookie': cookieString
+                      },
+                      body: postParams.toString()
+                    }
+                  );
+                  
+                  dlData = await dlRes.json();
+                  debugInfo.method3_downloadAPI.data.method = 'POST';
+                  debugInfo.method3_downloadAPI.data.errno = dlData.errno;
+                  debugInfo.method3_downloadAPI.data.errmsg = dlData.errmsg || dlData.error_msg;
+                  debugInfo.method3_downloadAPI.data.hasList = !!dlData.list;
+                  debugInfo.method3_downloadAPI.data.listLength = dlData.list?.length;
+                  // #region agent log
+                  console.log('[HYPOTHESIS-C] Method 3 POST - download API response:', JSON.stringify({
+                    errno: dlData.errno,
+                    errmsg: dlData.errmsg || dlData.error_msg,
+                    hasList: !!dlData.list,
+                    listLength: dlData.list?.length
+                  }));
+                  // #endregion
+                } catch (postErr) {
+                  console.error('Download API POST failed:', postErr.message);
+                }
+              }
               
               // Only use this if no error
               if (dlData.errno === 0 || dlData.errno === undefined) {
