@@ -14,7 +14,7 @@
     "node-cache": "^5.1.2",
     "cookie-parser": "^1.4.6"
   },
-  "engines": {
-    "node": "18.x"
-  }
+ "engines": {
+  "node": "24.x"
+}
 }
