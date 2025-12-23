@@ -363,8 +363,11 @@ module.exports = async (req, res) => {
             }
           }
 
-          // Since TeraBox blocks serverless backends, we return metadata for client-side download link fetching
-          // The client can use fs_id, shorturl, and other metadata to fetch download links from browser
+          // Since TeraBox blocks serverless backends, we provide fallback options
+          // If no direct download link, use share URL as fallback (users can download from TeraBox interface)
+          const shareUrl = `https://www.terabox.com/s/${shorturl}`;
+          const finalDownloadLink = dlink || shareUrl;
+          
           const result = {
             filename: file.server_filename,
             size: file.size,
@@ -372,15 +375,16 @@ module.exports = async (req, res) => {
             thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || file.thumbs?.url1 || null,
             isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename),
             isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.server_filename),
-            downloadLink: dlink, // May be null if server-side blocked
-            streamLink: dlink, // May be null if server-side blocked
+            downloadLink: finalDownloadLink, // Direct download link or share URL as fallback
+            streamLink: dlink || null, // Only direct link for streaming, null if blocked
+            shareUrl: shareUrl, // Original share URL for accessing via TeraBox interface
             md5: file.md5,
             path: file.path,
-            // Metadata needed for client-side download link fetching
+            // Metadata needed for client-side download link fetching (if you want to try browser-based fetching)
             fsId: file.fs_id,
             shorturl: shorturl,
-            // Client-side API endpoint info (if downloadLink is null, client can use this template)
-            downloadApiUrl: dlink ? null : `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp={timestamp}&app_id=250528`
+            // Flag indicating if this is a direct download link or fallback
+            isDirectLink: !!dlink
           };
           // #region agent log
           console.log('[HYPOTHESIS-E] Final result for file:', JSON.stringify({
@@ -416,8 +420,9 @@ module.exports = async (req, res) => {
       totalFiles: files.length,
       files,
       // Note: TeraBox blocks serverless backends from accessing download APIs
-      // If downloadLink is null, clients should fetch download links from their browser using fsId and shorturl
-      note: "TeraBox blocks serverless requests. Use client-side fetch with fsId and shorturl from each file object to get download links."
+      // downloadLink will be the share URL if direct download links are blocked (isDirectLink: false)
+      // Clients can access files through the share URL or use fsId/shorturl for browser-based fetching
+      note: "TeraBox blocks serverless requests. downloadLink may be a share URL (isDirectLink: false) which allows access via TeraBox interface. For direct downloads, use client-side fetch with fsId and shorturl."
     });
 
   } catch (error) {
