@@ -1,11 +1,11 @@
 {
-  "name": "terabox-proxy-api",
+  "name": "terabox-vercel-api",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "start": "node api/terabox.js"
+    "start": "node api/terabox.js",
+    "dev": "vercel dev"
   }
 }
 
