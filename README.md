@@ -1,129 +1,140 @@
-# Terabox API for Vercel
+# TeraBox API Backend
 
-A backend API to get download and streaming links from Terabox (formerly Dubox).
+A serverless API for extracting download and stream links from TeraBox.
 
-## Deployment on Vercel
+## Features
 
-1. **Install Vercel CLI:**
+- Extract download/stream links from TeraBox share links
+- Support for multiple file formats
+- Video detection
+- File size formatting
+- CORS enabled for frontend integration
+
+## Deployment
+
+### Deploy to Vercel
+
+1. Install Vercel CLI:
 ```bash
 npm install -g vercel
+```
 
-
-Deploy:
-
-bash
-vercel
-Or connect your GitHub repository to Vercel dashboard.
-
-API Endpoints
-1. Get File Information
-text
-GET /api/info?url=TERABOX_SHARE_URL
-Example:
-
-bash
-curl "https://your-app.vercel.app/api/info?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
-2. Get Download Link
-text
-GET /api/download?url=TERABOX_SHARE_URL
-Example:
-
-bash
-curl "https://your-app.vercel.app/api/download?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
-3. Get Stream Link
-text
-GET /api/stream?url=TERABOX_SHARE_URL
-Example:
-
-bash
-curl "https://your-app.vercel.app/api/stream?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
-Usage with Media Players
-For Streaming:
-HTML5 Video Player:
-
-html
-<video controls>
-  <source src="STREAM_URL_FROM_API" type="video/mp4">
-</video>
-VLC Media Player:
-
-text
-vlc://STREAM_URL_FROM_API
-PotPlayer/MX Player:
-Directly use the stream URL
-
-For Download:
-Direct Download:
-
-bash
-wget "DOWNLOAD_URL_FROM_API"
-IDM/Aria2:
-Add the download URL to your download manager
-
-Features
-CORS enabled
-
-5-minute caching for better performance
-
-Error handling and fallbacks
-
-Support for multiple media players
-
-Session management with cookies
-
-Notes
-Links expire after 1 hour
-
-Make sure to use valid Terabox share URLs
-
-The API uses cached cookies; you may need to update them periodically
-
-For large files, consider using download managers with resume capability
-
-text
-
-## Usage Instructions:
-
-1. **Create a new Vercel project** with this structure
-2. **Install dependencies:**
+2. Deploy:
 ```bash
-npm install
-Deploy to Vercel:
+vercel --prod
+```
 
-bash
-vercel
-Test the API:
+Or click this button:
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/terabox-api)
 
-javascript
-// Example fetch request
-fetch('https://your-app.vercel.app/api/download?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q')
-  .then(response => response.json())
-  .then(data => console.log(data));
-Important Notes:
-Cookie Maintenance: The cookies provided will expire. You'll need to:
+## API Usage
 
-Login to Terabox in a browser
+### Endpoint
+```
+GET /api/terabox?url={TERABOX_URL}
+```
 
-Extract fresh cookies using browser dev tools
+### Example Request
+```bash
+curl "https://your-domain.vercel.app/api/terabox?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
+```
 
-Update the getCookies() method in terabox.js
+### Example Response
+```json
+{
+  "success": true,
+  "shorturl": "1n9h8b63n7v6SxCaFMfOm2Q",
+  "files": [
+    {
+      "filename": "video.mp4",
+      "size": 123456789,
+      "sizeFormatted": "117.74 MB",
+      "thumbnail": "https://...",
+      "isVideo": true,
+      "downloadLink": "https://d3.terabox.com/...",
+      "streamLink": "https://d3.terabox.com/...",
+      "md5": "abc123..."
+    }
+  ]
+}
+```
 
-Rate Limiting: Add rate limiting in production
+## Frontend Integration
 
-Error Handling: The API includes fallback mechanisms for when streaming fails
+### JavaScript/Fetch
+```javascript
+const url = 'https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q';
+const response = await fetch(`https://your-domain.vercel.app/api/terabox?url=${encodeURIComponent(url)}`);
+const data = await response.json();
 
-Player Integration: The API provides URLs compatible with:
+if (data.success) {
+  data.files.forEach(file => {
+    console.log('Download Link:', file.downloadLink);
+    console.log('Stream Link:', file.streamLink);
+  });
+}
+```
 
-VLC Media Player
+### Using with Video Players
 
-PotPlayer
+#### Video.js
+```html
+<video id="player" class="video-js" controls></video>
 
-MX Player
+<script>
+const player = videojs('player');
+player.src({
+  src: data.files[0].streamLink,
+  type: 'video/mp4'
+});
+</script>
+```
 
-HTML5 video players
+#### Plyr
+```html
+<video id="player" playsinline controls></video>
 
-Download managers
+<script>
+const player = new Plyr('#player', {
+  controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen']
+});
+player.source = {
+  type: 'video',
+  sources: [{
+    src: data.files[0].streamLink,
+    type: 'video/mp4'
+  }]
+};
+</script>
+```
 
-This backend API will work on Vercel Serverless Functions and provides all necessary endpoints for streaming and downloading Terabox files through external players.
+## Supported URL Formats
 
+- `https://terabox.com/s/1xxxxx`
+- `https://1024terabox.com/s/1xxxxx`
+- `https://teraboxapp.com/s/1xxxxx`
+- `https://terasharelink.com/s/1xxxxx`
 
+## Error Handling
+
+The API returns appropriate HTTP status codes:
+
+- `200`: Success
+- `400`: Bad request (invalid URL)
+- `404`: File not found
+- `405`: Method not allowed
+- `500`: Internal server error
+
+## Rate Limiting
+
+TeraBox may have rate limits. Consider implementing caching or rate limiting on your end if you expect high traffic.
+
+## Notes
+
+- The download links are temporary and may expire after some time
+- Some files may require authentication depending on the share settings
+- Large files might take longer to process
+
+## License
+
+MIT
