@@ -58,116 +58,105 @@ module.exports = async (req, res) => {
       return res.status(404).json({ error: 'No files found in this link' });
     }
 
+    // Try to get download links from share/list endpoint first (more reliable)
+    let shareListData = null;
+    try {
+      const shareListRes = await fetch(
+        `https://www.terabox.com/share/list?app_id=250528&web=1&channel=chunlei&clienttype=0&shorturl=${shorturl}&root=1`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': `https://www.terabox.com/s/${shorturl}`,
+            'Origin': 'https://www.terabox.com',
+            'Cookie': cookieString
+          }
+        }
+      );
+      shareListData = await shareListRes.json();
+    } catch (shareErr) {
+      console.error('Share list fetch failed:', shareErr.message);
+    }
+
     // Get download links for all files
     const files = await Promise.all(
       info.list.map(async (file) => {
         try {
-          const timestamp = Date.now();
+          let dlink = null;
           
-          // Try GET request first
-          let dlRes = await fetch(
-            `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=${timestamp}&app_id=250528`,
-            {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': `https://www.terabox.com/s/${shorturl}`,
-                'Origin': 'https://www.terabox.com',
-                'Cookie': cookieString
-              }
+          // Method 1: Try share/list endpoint first (often has download links)
+          if (shareListData && shareListData.list && shareListData.list.length > 0) {
+            const shareFile = shareListData.list.find(f => f.fs_id === file.fs_id);
+            if (shareFile) {
+              dlink = shareFile.dlink || shareFile.download_link || shareFile.direct_link || 
+                      shareFile.download_url || shareFile.url || null;
             }
-          );
+          }
           
-          let dlData = await dlRes.json();
+          // Method 2: Check if file object already has download link
+          if (!dlink) {
+            dlink = file.dlink || file.download_link || file.direct_link || 
+                    file.download_url || file.url || null;
+          }
           
-          // If GET fails, try POST method
-          if ((dlData.errno !== 0 && dlData.errno !== undefined) || (!dlData.list || dlData.list.length === 0)) {
+          // Method 3: Try download API endpoint (if share/list didn't work)
+          if (!dlink) {
             try {
-              const postParams = new URLSearchParams({
-                'fid_list': `[${file.fs_id}]`,
-                'shorturl': shorturl,
-                'sign': '',
-                'timestamp': timestamp.toString(),
-                'app_id': '250528'
-              });
-              
-              dlRes = await fetch(
-                `https://www.terabox.com/api/download`,
+              const timestamp = Date.now();
+              const dlRes = await fetch(
+                `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=${timestamp}&app_id=250528`,
                 {
-                  method: 'POST',
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'application/json, text/plain, */*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'Content-Type': 'application/x-www-form-urlencoded',
                     'Referer': `https://www.terabox.com/s/${shorturl}`,
                     'Origin': 'https://www.terabox.com',
                     'Cookie': cookieString
-                  },
-                  body: postParams.toString()
+                  }
                 }
               );
               
-              dlData = await dlRes.json();
-            } catch (postErr) {
-              console.error('POST method also failed:', postErr.message);
+              const dlData = await dlRes.json();
+              
+              // Only use this if no error
+              if (dlData.errno === 0 || dlData.errno === undefined) {
+                if (dlData.list && dlData.list.length > 0) {
+                  dlink = dlData.list[0].dlink || dlData.list[0].download_link || 
+                          dlData.list[0].direct_link || null;
+                } else if (dlData.dlink) {
+                  dlink = dlData.dlink;
+                }
+              } else {
+                console.error('Download API error:', dlData.errno, dlData.errmsg || dlData.error_msg);
+              }
+            } catch (dlErr) {
+              console.error('Download API request failed:', dlErr.message);
             }
           }
           
-          // Check for API errors
-          if (dlData.errno !== 0 && dlData.errno !== undefined) {
-            console.error('Download API error:', dlData.errno, dlData.errmsg || dlData.error_msg);
-            return {
-              filename: file.server_filename,
-              size: file.size,
-              sizeFormatted: formatBytes(file.size),
-              thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || file.thumbs?.url1 || null,
-              isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename),
-              isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.server_filename),
-              downloadLink: null,
-              streamLink: null,
-              md5: file.md5,
-              path: file.path,
-              error: `API error: ${dlData.errno} - ${dlData.errmsg || dlData.error_msg || 'Unknown error'}`
-            };
-          }
-          
-          // Try different possible response structures
-          let dlink = null;
-          if (dlData.list && dlData.list.length > 0) {
-            dlink = dlData.list[0].dlink || dlData.list[0].download_link || dlData.list[0].direct_link || null;
-          } else if (dlData.dlink) {
-            dlink = dlData.dlink;
-          } else if (dlData.download_link) {
-            dlink = dlData.download_link;
-          } else if (dlData.direct_link) {
-            dlink = dlData.direct_link;
-          }
-          
-          // If no direct link found, try alternative method using share info
-          if (!dlink && file.shareid) {
+          // Method 4: Try streamdownload endpoint for videos
+          const isVideo = /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename);
+          if (!dlink && (isVideo || file.isvideo === 1)) {
             try {
-              const altRes = await fetch(
-                `https://www.terabox.com/share/list?app_id=250528&web=1&channel=chunlei&clienttype=0&shorturl=${shorturl}&root=1`,
+              const streamRes = await fetch(
+                `https://www.terabox.com/api/streamdownload?app_id=250528&channel=chunlei&clienttype=0&fs_id=${file.fs_id}&shorturl=${shorturl}&web=1`,
                 {
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'application/json, text/plain, */*',
-                    'Cookie': cookieString,
-                    'Referer': `https://www.terabox.com/s/${shorturl}`
+                    'Referer': `https://www.terabox.com/s/${shorturl}`,
+                    'Cookie': cookieString
                   }
                 }
               );
-              const altData = await altRes.json();
-              if (altData.list && altData.list.length > 0) {
-                const fileData = altData.list.find(f => f.fs_id === file.fs_id);
-                if (fileData && (fileData.dlink || fileData.download_link)) {
-                  dlink = fileData.dlink || fileData.download_link;
-                }
+              const streamData = await streamRes.json();
+              if (streamData.errno === 0 || streamData.errno === undefined) {
+                dlink = streamData.dlink || streamData.url || streamData.stream_url || null;
               }
-            } catch (altErr) {
-              console.error('Alternative method failed:', altErr.message);
+            } catch (streamErr) {
+              console.error('Streamdownload API failed:', streamErr.message);
             }
           }
 
