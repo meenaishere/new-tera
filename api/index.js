@@ -1,6 +1,5 @@
 // TeraBox API with Cookie Authentication - api/index.js
 module.exports = async (req, res) => {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -9,85 +8,69 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
-  // ✅ FIX: handle root & favicon requests gracefully
+  // Root handler (prevents 400 spam)
   if (req.method === 'GET' && !req.query.url) {
     return res.status(200).json({
       status: 'API is running',
-      usage: '/api?url=TERABOX_LINK',
-      example: '/api?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q'
+      usage: '/api?url=TERABOX_LINK'
     });
   }
 
   const url = req.query.url || req.body?.url;
-
   if (!url) {
-    return res.status(400).json({
-      error: 'URL parameter is required',
-      usage: 'GET /api?url=YOUR_TERABOX_URL'
-    });
+    return res.status(400).json({ error: 'URL parameter is required' });
   }
 
   try {
-    // Extract shorturl
     const match = url.match(/\/s\/([a-zA-Z0-9_-]+)/);
     if (!match) {
       return res.status(400).json({ error: 'Invalid TeraBox URL format' });
     }
     const shorturl = match[1];
 
-    // Build cookie string
     const cookieString = buildCookieString();
 
-    // Get file info
+    // 1️⃣ Get file info
     const infoRes = await fetch(
       `https://www.terabox.com/api/shorturlinfo?shorturl=${shorturl}&root=1`,
       {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent': 'Mozilla/5.0',
           'Referer': 'https://www.terabox.com/',
-          'Origin': 'https://www.terabox.com',
           'Cookie': cookieString
         }
       }
     );
 
     const info = await infoRes.json();
-
-    if (info.errno !== 0) {
-      return res.status(404).json({
-        error: 'File not found or link expired',
-        errno: info.errno
-      });
+    if (info.errno !== 0 || !info.list?.length) {
+      return res.status(404).json({ error: 'File not found or expired' });
     }
 
-    if (!info.list || info.list.length === 0) {
-      return res.status(404).json({ error: 'No files found in this link' });
-    }
-
-    // Get download links
+    // 2️⃣ Resolve links
     const files = await Promise.all(
       info.list.map(async (file) => {
         try {
           const dlRes = await fetch(
-            `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=&app_id=250528`,
+            `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&app_id=250528`,
             {
               headers: {
-                'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': 'https://www.terabox.com/',
-                'Origin': 'https://www.terabox.com',
+                'User-Agent': 'Mozilla/5.0',
+                'Referer': `https://www.terabox.com/s/${shorturl}`,
                 'Cookie': cookieString
               }
             }
           );
 
           const dlData = await dlRes.json();
-          const dlink = dlData.list?.[0]?.dlink || null;
+          const item = dlData.list?.[0] || {};
+
+          // ✅ REAL FIX
+          const link =
+            item.dlink ||
+            item.play_url ||
+            item.play_backup_url ||
+            null;
 
           return {
             filename: file.server_filename,
@@ -98,22 +81,22 @@ module.exports = async (req, res) => {
               file.thumbs?.url2 ||
               file.thumbs?.url1 ||
               null,
-            isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(
+            isVideo: /\.(mp4|mkv|avi|mov|flv|webm|m4v|ts|m3u8)$/i.test(
               file.server_filename
             ),
             isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(
               file.server_filename
             ),
-            downloadLink: dlink,
-            streamLink: dlink,
+            downloadLink: link,
+            streamLink: link,
             md5: file.md5,
             path: file.path
           };
-        } catch (err) {
+        } catch {
           return {
             filename: file.server_filename,
-            error: 'Failed to get download link',
-            size: file.size
+            size: file.size,
+            error: 'Failed to resolve link'
           };
         }
       })
@@ -125,11 +108,10 @@ module.exports = async (req, res) => {
       totalFiles: files.length,
       files
     });
-  } catch (error) {
-    console.error('API Error:', error);
+  } catch (err) {
     res.status(500).json({
       error: 'Server error',
-      message: error.message
+      message: err.message
     });
   }
 };
