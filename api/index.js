@@ -79,10 +79,12 @@ module.exports = async (req, res) => {
       console.log('[HYPOTHESIS-A] share/list response:', JSON.stringify({
         hasData: !!shareListData,
         errno: shareListData?.errno,
+        errmsg: shareListData?.errmsg,
         hasList: !!shareListData?.list,
         listLength: shareListData?.list?.length,
         listKeys: shareListData?.list?.[0] ? Object.keys(shareListData.list[0]) : [],
-        firstItemSample: shareListData?.list?.[0] ? Object.fromEntries(Object.entries(shareListData.list[0]).slice(0, 10)) : null
+        firstItemSample: shareListData?.list?.[0] ? Object.fromEntries(Object.entries(shareListData.list[0]).slice(0, 10)) : null,
+        responseKeys: Object.keys(shareListData || {}).slice(0, 20)
       }));
       // #endregion
     } catch (shareErr) {
@@ -116,6 +118,17 @@ module.exports = async (req, res) => {
           // #endregion
           
           // Method 1: Try share/list endpoint first (often has download links)
+          // Log why method1 might not run
+          if (!shareListData || !shareListData.list || shareListData.list.length === 0) {
+            debugInfo.method1_shareList.data = {
+              hasShareListData: !!shareListData,
+              shareListErrno: shareListData?.errno,
+              shareListErrmsg: shareListData?.errmsg,
+              hasList: !!shareListData?.list,
+              listLength: shareListData?.list?.length,
+              shareListKeys: shareListData ? Object.keys(shareListData).slice(0, 20) : []
+            };
+          }
           if (shareListData && shareListData.list && shareListData.list.length > 0) {
             debugInfo.method1_shareList.tried = true;
             const shareFile = shareListData.list.find(f => f.fs_id === file.fs_id);
@@ -123,6 +136,7 @@ module.exports = async (req, res) => {
               found: !!shareFile,
               keys: shareFile ? Object.keys(shareFile).slice(0, 20) : [],
               hasDlink: !!shareFile?.dlink,
+              dlinkValue: shareFile?.dlink,
               hasDownloadLink: !!shareFile?.download_link,
               sample: shareFile ? Object.fromEntries(Object.entries(shareFile).slice(0, 5)) : null
             };
@@ -144,6 +158,8 @@ module.exports = async (req, res) => {
             debugInfo.method2_fileObject.tried = true;
             debugInfo.method2_fileObject.data = {
               hasDlink: !!file.dlink,
+              dlinkValue: file.dlink, // Check actual value even if falsy
+              dlinkType: typeof file.dlink,
               hasDownloadLink: !!file.download_link,
               hasDirectLink: !!file.direct_link,
               hasDownloadUrl: !!file.download_url,
@@ -352,4 +368,3 @@ function formatBytes(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
 }
-
