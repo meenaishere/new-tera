@@ -62,22 +62,114 @@ module.exports = async (req, res) => {
     const files = await Promise.all(
       info.list.map(async (file) => {
         try {
-          const dlRes = await fetch(
-            `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=&app_id=250528`,
+          const timestamp = Date.now();
+          
+          // Try GET request first
+          let dlRes = await fetch(
+            `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp=${timestamp}&app_id=250528`,
             {
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'application/json, text/plain, */*',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': 'https://www.terabox.com/',
+                'Referer': `https://www.terabox.com/s/${shorturl}`,
                 'Origin': 'https://www.terabox.com',
                 'Cookie': cookieString
               }
             }
           );
           
-          const dlData = await dlRes.json();
-          const dlink = dlData.list?.[0]?.dlink || null;
+          let dlData = await dlRes.json();
+          
+          // If GET fails, try POST method
+          if ((dlData.errno !== 0 && dlData.errno !== undefined) || (!dlData.list || dlData.list.length === 0)) {
+            try {
+              const postParams = new URLSearchParams({
+                'fid_list': `[${file.fs_id}]`,
+                'shorturl': shorturl,
+                'sign': '',
+                'timestamp': timestamp.toString(),
+                'app_id': '250528'
+              });
+              
+              dlRes = await fetch(
+                `https://www.terabox.com/api/download`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Referer': `https://www.terabox.com/s/${shorturl}`,
+                    'Origin': 'https://www.terabox.com',
+                    'Cookie': cookieString
+                  },
+                  body: postParams.toString()
+                }
+              );
+              
+              dlData = await dlRes.json();
+            } catch (postErr) {
+              console.error('POST method also failed:', postErr.message);
+            }
+          }
+          
+          // Check for API errors
+          if (dlData.errno !== 0 && dlData.errno !== undefined) {
+            console.error('Download API error:', dlData.errno, dlData.errmsg || dlData.error_msg);
+            return {
+              filename: file.server_filename,
+              size: file.size,
+              sizeFormatted: formatBytes(file.size),
+              thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || file.thumbs?.url1 || null,
+              isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename),
+              isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.server_filename),
+              downloadLink: null,
+              streamLink: null,
+              md5: file.md5,
+              path: file.path,
+              error: `API error: ${dlData.errno} - ${dlData.errmsg || dlData.error_msg || 'Unknown error'}`
+            };
+          }
+          
+          // Try different possible response structures
+          let dlink = null;
+          if (dlData.list && dlData.list.length > 0) {
+            dlink = dlData.list[0].dlink || dlData.list[0].download_link || dlData.list[0].direct_link || null;
+          } else if (dlData.dlink) {
+            dlink = dlData.dlink;
+          } else if (dlData.download_link) {
+            dlink = dlData.download_link;
+          } else if (dlData.direct_link) {
+            dlink = dlData.direct_link;
+          }
+          
+          // If no direct link found, try alternative method using share info
+          if (!dlink && file.shareid) {
+            try {
+              const altRes = await fetch(
+                `https://www.terabox.com/share/list?app_id=250528&web=1&channel=chunlei&clienttype=0&shorturl=${shorturl}&root=1`,
+                {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Cookie': cookieString,
+                    'Referer': `https://www.terabox.com/s/${shorturl}`
+                  }
+                }
+              );
+              const altData = await altRes.json();
+              if (altData.list && altData.list.length > 0) {
+                const fileData = altData.list.find(f => f.fs_id === file.fs_id);
+                if (fileData && (fileData.dlink || fileData.download_link)) {
+                  dlink = fileData.dlink || fileData.download_link;
+                }
+              }
+            } catch (altErr) {
+              console.error('Alternative method failed:', altErr.message);
+            }
+          }
 
           return {
             filename: file.server_filename,
@@ -92,10 +184,19 @@ module.exports = async (req, res) => {
             path: file.path
           };
         } catch (err) {
+          console.error('Error processing file:', file.server_filename, err.message);
           return {
             filename: file.server_filename,
-            error: 'Failed to get download link',
-            size: file.size
+            size: file.size,
+            sizeFormatted: formatBytes(file.size),
+            thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || file.thumbs?.url1 || null,
+            isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename),
+            isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.server_filename),
+            downloadLink: null,
+            streamLink: null,
+            md5: file.md5,
+            path: file.path,
+            error: `Failed to get download link: ${err.message}`
           };
         }
       })
