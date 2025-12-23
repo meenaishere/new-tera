@@ -10,6 +10,17 @@ A serverless API for extracting download and stream links from TeraBox.
 - File size formatting
 - CORS enabled for frontend integration
 
+## Project Structure
+
+```
+your-project/
+├── api/
+│   └── index.js          # Main API handler
+├── vercel.json           # Vercel configuration
+├── package.json          # Project dependencies
+└── README.md            # Documentation
+```
+
 ## Deployment
 
 ### Deploy to Vercel
@@ -31,12 +42,13 @@ Or click this button:
 
 ### Endpoint
 ```
-GET /api/terabox?url={TERABOX_URL}
+GET /api?url={TERABOX_URL}
+POST /api (with JSON body: {"url": "..."})
 ```
 
 ### Example Request
 ```bash
-curl "https://your-domain.vercel.app/api/terabox?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
+curl "https://your-domain.vercel.app/api?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
 ```
 
 ### Example Response
@@ -64,7 +76,7 @@ curl "https://your-domain.vercel.app/api/terabox?url=https://1024terabox.com/s/1
 ### JavaScript/Fetch
 ```javascript
 const url = 'https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q';
-const response = await fetch(`https://your-domain.vercel.app/api/terabox?url=${encodeURIComponent(url)}`);
+const response = await fetch(`https://your-domain.vercel.app/api?url=${encodeURIComponent(url)}`);
 const data = await response.json();
 
 if (data.success) {
