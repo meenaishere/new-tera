@@ -75,8 +75,14 @@ module.exports = async (req, res) => {
         }
       );
       shareListData = await shareListRes.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:77',message:'share/list response received',data:{hasData:!!shareListData,errno:shareListData?.errno,hasList:!!shareListData?.list,listLength:shareListData?.list?.length,listKeys:shareListData?.list?.[0]?Object.keys(shareListData.list[0]):[],fullResponse:JSON.stringify(shareListData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
     } catch (shareErr) {
       console.error('Share list fetch failed:', shareErr.message);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:79',message:'share/list fetch error',data:{error:shareErr.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
     }
 
     // Get download links for all files
@@ -84,13 +90,22 @@ module.exports = async (req, res) => {
       info.list.map(async (file) => {
         try {
           let dlink = null;
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:85',message:'processing file',data:{fsId:file.fs_id,filename:file.server_filename,fileKeys:Object.keys(file).slice(0,20),hasDlink:!!file.dlink,hasDownloadLink:!!file.download_link,hasUrl:!!file.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
           
           // Method 1: Try share/list endpoint first (often has download links)
           if (shareListData && shareListData.list && shareListData.list.length > 0) {
             const shareFile = shareListData.list.find(f => f.fs_id === file.fs_id);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:90',message:'Method 1: checking share/list',data:{foundShareFile:!!shareFile,shareFileKeys:shareFile?Object.keys(shareFile).slice(0,20):[],shareFileDlink:shareFile?.dlink?.substring(0,100),shareFileDownloadLink:shareFile?.download_link?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
             if (shareFile) {
               dlink = shareFile.dlink || shareFile.download_link || shareFile.direct_link || 
                       shareFile.download_url || shareFile.url || null;
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:93',message:'Method 1 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
             }
           }
           
@@ -98,6 +113,9 @@ module.exports = async (req, res) => {
           if (!dlink) {
             dlink = file.dlink || file.download_link || file.direct_link || 
                     file.download_url || file.url || null;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:102',message:'Method 2 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
           }
           
           // Method 3: Try download API endpoint (if share/list didn't work)
@@ -119,6 +137,9 @@ module.exports = async (req, res) => {
               );
               
               const dlData = await dlRes.json();
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:121',message:'Method 3: download API response',data:{errno:dlData.errno,errmsg:dlData.errmsg||dlData.error_msg,hasList:!!dlData.list,listLength:dlData.list?.length,listKeys:dlData.list?.[0]?Object.keys(dlData.list[0]).slice(0,15):[],listDlink:dlData.list?.[0]?.dlink?.substring(0,100),hasDlink:!!dlData.dlink,responseKeys:Object.keys(dlData).slice(0,15),fullResponse:JSON.stringify(dlData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+              // #endregion
               
               // Only use this if no error
               if (dlData.errno === 0 || dlData.errno === undefined) {
@@ -128,6 +149,9 @@ module.exports = async (req, res) => {
                 } else if (dlData.dlink) {
                   dlink = dlData.dlink;
                 }
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:130',message:'Method 3 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
               } else {
                 console.error('Download API error:', dlData.errno, dlData.errmsg || dlData.error_msg);
               }
@@ -151,16 +175,35 @@ module.exports = async (req, res) => {
                   }
                 }
               );
-              const streamData = await streamRes.json();
+              const contentType = streamRes.headers.get('content-type') || '';
+              const responseText = await streamRes.text();
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:148',message:'Method 4: streamdownload raw response',data:{status:streamRes.status,contentType:contentType,isJSON:contentType.includes('json'),responsePreview:responseText.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
+              let streamData;
+              try {
+                streamData = JSON.parse(responseText);
+              } catch (parseErr) {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:154',message:'Method 4: JSON parse failed',data:{error:parseErr.message,responseText:responseText.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                throw parseErr;
+              }
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:157',message:'Method 4: streamdownload parsed',data:{errno:streamData?.errno,hasDlink:!!streamData?.dlink,streamDataKeys:Object.keys(streamData).slice(0,15),fullResponse:JSON.stringify(streamData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
               if (streamData.errno === 0 || streamData.errno === undefined) {
                 dlink = streamData.dlink || streamData.url || streamData.stream_url || null;
               }
             } catch (streamErr) {
               console.error('Streamdownload API failed:', streamErr.message);
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:162',message:'Method 4: streamdownload error',data:{error:streamErr.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
             }
           }
 
-          return {
+          const result = {
             filename: file.server_filename,
             size: file.size,
             sizeFormatted: formatBytes(file.size),
@@ -172,6 +215,10 @@ module.exports = async (req, res) => {
             md5: file.md5,
             path: file.path
           };
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:175',message:'Final result for file',data:{filename:result.filename,hasDownloadLink:!!result.downloadLink,downloadLinkPreview:result.downloadLink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          return result;
         } catch (err) {
           console.error('Error processing file:', file.server_filename, err.message);
           return {
