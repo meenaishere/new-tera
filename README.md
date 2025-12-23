@@ -48,7 +48,7 @@ POST /api (with JSON body: {"url": "..."})
 
 ### Example Request
 ```bash
-curl "https://your-domain.vercel.app/api?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
+curl "https://new-tera.vercel.app/api?url=https://1024terabox.com/s/1n9h8b63n7v6SxCaFMfOm2Q"
 ```
 
 ### Example Response
