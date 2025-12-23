@@ -1,20 +1,13 @@
 {
   "name": "terabox-api",
   "version": "1.0.0",
-  "description": "Terabox API for streaming and downloading files",
-  "main": "index.js",
+  "description": "TeraBox API for extracting download and stream links",
+  "main": "api/terabox.js",
   "scripts": {
-    "start": "node index.js"
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
   },
-  "dependencies": {
-    "axios": "^1.6.0",
-    "cheerio": "^1.0.0-rc.12",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "node-cache": "^5.1.2",
-    "cookie-parser": "^1.4.6"
-  },
- "engines": {
-  "node": "24.x"
-}
+  "keywords": ["terabox", "api", "download", "stream"],
+  "author": "",
+  "license": "MIT"
 }
