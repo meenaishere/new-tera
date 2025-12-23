@@ -379,9 +379,8 @@ module.exports = async (req, res) => {
             // Metadata needed for client-side download link fetching
             fsId: file.fs_id,
             shorturl: shorturl,
-            // Client-side API endpoint info
-            downloadApiUrl: dlink ? null : `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp={timestamp}&app_id=250528`,
-            _debug: debugInfo
+            // Client-side API endpoint info (if downloadLink is null, client can use this template)
+            downloadApiUrl: dlink ? null : `https://www.terabox.com/api/download?fid_list=[${file.fs_id}]&shorturl=${shorturl}&sign=&timestamp={timestamp}&app_id=250528`
           };
           // #region agent log
           console.log('[HYPOTHESIS-E] Final result for file:', JSON.stringify({
@@ -416,9 +415,9 @@ module.exports = async (req, res) => {
       shorturl,
       totalFiles: files.length,
       files,
-      // Note: TeraBox blocks serverless backends, so download links may be null
-      // Client-side can fetch download links using the fsId and shorturl provided in each file object
-      note: "If downloadLink is null, TeraBox may be blocking serverless requests. Use client-side fetch with fsId and shorturl."
+      // Note: TeraBox blocks serverless backends from accessing download APIs
+      // If downloadLink is null, clients should fetch download links from their browser using fsId and shorturl
+      note: "TeraBox blocks serverless requests. Use client-side fetch with fsId and shorturl from each file object to get download links."
     });
 
   } catch (error) {
