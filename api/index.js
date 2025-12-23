@@ -1,98 +1,85 @@
 // api/index.js
 module.exports = async (req, res) => {
+  // Allow CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
   
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  let url = req.query.url || req.body?.url;
-
-  if (!url) return res.status(400).json({ error: 'URL is required' });
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ error: 'URL required' });
 
   try {
-    // 1. FIX: Normalize URL to terabox.com
-    // 1024terabox links often fail scraping tools.
-    url = url.replace(/(1024terabox|teraboxapp|terabox)\.com/, 'terabox.com');
-
-    // 2. Extract the Short Code (needed for fallback)
+    // 1. Extract the short code (e.g., "1n9h8b63...")
+    // This handles terabox.com, 1024terabox, teraboxapp, etc.
     const shortCodeMatch = url.match(/\/s\/([a-zA-Z0-9_-]+)/);
-    const shortCode = shortCodeMatch ? shortCodeMatch[1] : null;
+    if (!shortCodeMatch) {
+        return res.status(400).json({ error: 'Invalid URL format. Could not find short code.' });
+    }
+    const shortCode = shortCodeMatch[1];
+    
+    // 2. Construct clean URL (Force HTTPS and main domain)
+    const targetUrl = `https://www.terabox.com/s/${shortCode}`;
 
-    console.log(`Fetching: ${url}`);
-
-    // 3. Fetch HTML WITHOUT Cookies first
-    // Sending 'ndus' cookies from a Vercel IP often triggers a "Security Verification" page.
-    const response = await fetch(url, {
+    // 3. Fetch with GOOGLEBOT Headers
+    // This is the key trick to bypass the "Datacenter IP" block.
+    const response = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.google.com/'
         }
     });
 
-    // Check if we got a valid response
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    
     const html = await response.text();
 
-    // Debug: Check if we got the Captcha page
-    if (html.includes('security-check') || html.includes('spam-protection')) {
-        return res.status(403).json({ error: 'TeraBox blocked Vercel IP (Captcha triggered). Try using a residential proxy.' });
-    }
+    // 4. Debugging: Check what page we actually got
+    const titleMatch = html.match(/<title>(.*?)<\/title>/);
+    const pageTitle = titleMatch ? titleMatch[1] : 'Unknown Page';
 
-    // 4. Regex: Try standard yunData
-    let match = html.match(/window\.yunData\s*=\s*({.+?});/);
-    
-    // 4b. Regex: Fallback (Sometimes data is in 'init' function)
-    if (!match) {
-        match = html.match(/yunData\.setData\(({.+?})\);/);
-    }
+    // 5. Extract Data using robust Regex (Handles multi-line JSON)
+    const regex = /window\.yunData\s*=\s*(\{[\s\S]*?\});/;
+    const match = html.match(regex);
 
     if (!match) {
-        console.log("HTML Preview:", html.substring(0, 500)); // Log for debugging
-        return res.status(500).json({ error: 'Could not extract data. TeraBox layout changed or IP blocked.' });
+        // If we fail here, we know exactly why based on the Title
+        console.error("Scrape failed. Page Title:", pageTitle);
+        return res.status(503).json({ 
+            error: 'Scraping failed', 
+            reason: pageTitle.includes('WAF') || pageTitle.includes('check') ? 'IP Blocked by TeraBox' : 'Layout Changed',
+            pageTitle: pageTitle 
+        });
     }
 
     const data = JSON.parse(match[1]);
 
-    if (!data.file_list || data.file_list.length === 0) {
-      return res.status(404).json({ error: 'No files found in this link' });
-    }
-
-    // 5. Send Data to Client
-    const files = data.file_list.map((file) => ({
-        filename: file.server_filename,
-        size: file.size,
-        sizeFormatted: formatBytes(file.size),
-        thumbnail: file.thumbs?.url3 || null,
-        fs_id: file.fs_id, // Vital for client-side fetch
-        isDir: file.isdir
-    }));
-
+    // 6. Return Clean Data
     res.json({
-      success: true,
-      share_data: {
-        shorturl: shortCode, 
-        uk: data.uk,
+        success: true,
+        ok: true, // Legacy support
         shareid: data.shareid,
+        uk: data.uk,
         sign: data.sign,
         timestamp: data.timestamp,
-        jsToken: data.jsToken 
-      },
-      files: files
+        jsToken: data.jsToken, // Needed for API calls
+        shorturl: shortCode,
+        list: data.file_list.map(f => ({
+            fs_id: f.fs_id,
+            filename: f.server_filename,
+            size: f.size,
+            isDir: f.isdir,
+            // Direct download link generation requires client-side fetch,
+            // but we pass the keys needed to do it.
+            download_keys: {
+                uk: data.uk,
+                shareid: data.shareid,
+                sign: data.sign,
+                timestamp: data.timestamp,
+                fs_id: f.fs_id
+            }
+        }))
     });
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server Error', details: error.message });
+    res.status(500).json({ error: error.message });
   }
 };
-
-function formatBytes(bytes) {
-  if (!bytes) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
-}
