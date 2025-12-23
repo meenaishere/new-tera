@@ -84,7 +84,7 @@ module.exports = async (req, res) => {
             size: file.size,
             sizeFormatted: formatBytes(file.size),
             thumbnail: file.thumbs?.url3 || file.thumbs?.url2 || file.thumbs?.url1 || null,
-            isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v)$/i.test(file.server_filename),
+            isVideo: /\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|ts|m3u8)$/i.test(file.server_filename),
             isAudio: /\.(mp3|wav|flac|aac|ogg|m4a)$/i.test(file.server_filename),
             downloadLink: dlink,
             streamLink: dlink,
