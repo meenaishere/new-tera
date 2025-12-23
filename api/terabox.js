@@ -1,30 +1,36 @@
 /**
- * Vercel-ready serverless function to fetch Terabox metadata or download links.
- * Requires a valid Terabox web session cookie. Supply via:
- * - env TERABOX_COOKIE (full "k1=v1; k2=v2" string), OR
- * - env TERABOX_COOKIES_JSON (JSON string like the provided tera cookies.json), OR
- * - local file ./tera cookies.json (Chrome/Firefox export).
+ * Vercel-ready API that converts a Terabox share link into metadata and a direct download link.
+ * Uses the scraping flow from the provided bot repo (jsToken + dp-logid + shorturl).
  *
- * Usage:
- *   GET /api/terabox?url=<share_url>&action=meta
- *   GET /api/terabox?url=<share_url>&action=download[&fs_id=<id>]
+ * Inputs:
+ *   GET /api/terabox?url=<share_url>&action=meta|download
+ *   Optional: &index=<n> (0-based file index, default 0)
  *
- * Response:
- *   { ok: true, data: {...} } or { ok: false, error: "message" }
+ * Auth (cookies):
+ *   - Set env TERABOX_COOKIE to a "k=v; k2=v2" string, or
+ *   - Set env TERABOX_COOKIES_JSON to the JSON export you provided, or
+ *   - Place "tera cookies.json" at project root (Chrome/Firefox export).
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
-const sharePageHeaders = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
+const baseHeaders = {
+  "User-Agent": UA,
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  Connection: "keep-alive"
 };
 
-/**
- * Load cookie header value from env or local json file.
- */
+function json(res, status, body) {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(body));
+}
+
 function loadCookieHeader() {
   if (process.env.TERABOX_COOKIE) return process.env.TERABOX_COOKIE.trim();
 
@@ -40,14 +46,15 @@ function loadCookieHeader() {
     })();
 
   if (!jsonSource) return "";
-
   try {
     const parsed = typeof jsonSource === "string" ? JSON.parse(jsonSource) : jsonSource;
-    if (Array.isArray(parsed)) {
-      return parsed.map((c) => `${c.name}=${c.value}`).join("; ");
-    }
-    if (parsed.cookies && Array.isArray(parsed.cookies)) {
-      return parsed.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const cookiesArray = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.cookies)
+      ? parsed.cookies
+      : null;
+    if (cookiesArray) {
+      return cookiesArray.map((c) => `${c.name}=${c.value}`).join("; ");
     }
   } catch {
     return "";
@@ -55,20 +62,22 @@ function loadCookieHeader() {
   return "";
 }
 
-function json(res, status, body) {
-  res.statusCode = status;
-  res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(body));
+function findBetween(data, first, last) {
+  try {
+    const start = data.indexOf(first);
+    if (start === -1) return null;
+    const end = data.indexOf(last, start + first.length);
+    if (end === -1) return null;
+    return data.slice(start + first.length, end);
+  } catch {
+    return null;
+  }
 }
 
-/**
- * Extract window.yunData payload from the share page.
- */
-function extractYunData(html) {
-  const match = html.match(/window\.yunData\s*=\s*(\{.+?\});/s);
-  if (!match) return null;
+function extractSurl(urlStr) {
   try {
-    return JSON.parse(match[1]);
+    const u = new URL(urlStr);
+    return u.searchParams.get("surl");
   } catch {
     return null;
   }
@@ -76,103 +85,98 @@ function extractYunData(html) {
 
 async function fetchSharePage(url, cookie) {
   const res = await fetch(url, {
-    headers: {
-      ...sharePageHeaders,
-      Cookie: cookie
-    }
+    headers: { ...baseHeaders, Cookie: cookie }
   });
-  if (!res.ok) throw new Error(`Share page request failed: ${res.status}`);
-  return res.text();
+  if (!res.ok) throw new Error(`Share page failed: ${res.status}`);
+  const text = await res.text();
+  return { text, finalUrl: res.url };
 }
 
-async function listFiles(yunData, cookie) {
-  const { shareid, uk, sign, timestamp, logid, bdstoken } = yunData;
-  const params = new URLSearchParams({
-    shareid,
-    uk,
-    sign,
-    timestamp,
-    bdstoken,
-    channel: "4",
-    web: "1",
-    app_id: "250528",
-    order: "name",
-    desc: "0"
-  });
+async function fetchList({ jsToken, logid, shorturl }, cookie) {
+  const apiUrl = `https://www.terabox.app/share/list?app_id=250528&web=1&channel=0&jsToken=${encodeURIComponent(
+    jsToken
+  )}&dp-logid=${encodeURIComponent(
+    logid
+  )}&page=1&num=20&by=name&order=asc&shorturl=${encodeURIComponent(shorturl)}&root=1`;
 
-  const res = await fetch(`https://www.terabox.com/share/list?${params.toString()}`, {
+  const res = await fetch(apiUrl, {
     headers: {
       Cookie: cookie,
-      "User-Agent": sharePageHeaders["User-Agent"],
+      "User-Agent": UA,
       Accept: "application/json, text/plain, */*"
     }
   });
   if (!res.ok) throw new Error(`share/list failed: ${res.status}`);
-  const json = await res.json();
-  if (json.errno !== 0) throw new Error(`share/list errno ${json.errno}`);
-  return json.list;
+  const data = await res.json();
+  if (data.errno) throw new Error(`share/list errno ${data.errno}`);
+  return data.list || [];
 }
 
-async function getDownloadLink(yunData, cookie, fsId) {
-  const { shareid, uk, sign, timestamp } = yunData;
-  const params = new URLSearchParams({
-    shareid,
-    uk,
-    sign,
-    timestamp,
-    channel: "4",
-    web: "1",
-    app_id: "250528",
-    clienttype: "12",
-    primaryid: shareid,
-    fid_list: JSON.stringify([fsId]),
-    type: "dlink"
+async function resolveDirectLink(dlink, cookie) {
+  const res = await fetch(dlink, {
+    method: "HEAD",
+    redirect: "manual",
+    headers: { Cookie: cookie, "User-Agent": UA }
   });
-
-  const res = await fetch("https://www.terabox.com/share/download", {
-    method: "POST",
-    headers: {
-      Cookie: cookie,
-      "User-Agent": sharePageHeaders["User-Agent"],
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      Accept: "application/json, text/plain, */*",
-      Origin: "https://www.terabox.com",
-      Referer: "https://www.terabox.com/"
-    },
-    body: params.toString()
-  });
-
-  if (!res.ok) throw new Error(`share/download failed: ${res.status}`);
-  const json = await res.json();
-  if (json.errno !== 0 || !json.dlink) throw new Error(`download errno ${json.errno ?? "unknown"}`);
-  return json.dlink;
+  // location header holds the actual download URL
+  return res.headers.get("location") || dlink;
 }
 
 export default async function handler(req, res) {
-  const { url, action = "meta", fs_id: fsIdParam } = req.query;
+  const { url, action = "meta", index = "0" } = req.query;
   if (!url) return json(res, 400, { ok: false, error: "Missing url" });
 
   const cookie = loadCookieHeader();
   if (!cookie) return json(res, 400, { ok: false, error: "Missing TERABOX_COOKIE" });
 
   try {
-    const html = await fetchSharePage(url, cookie);
-    const yunData = extractYunData(html);
-    if (!yunData) throw new Error("Could not parse share page payload");
+    const { text, finalUrl } = await fetchSharePage(url, cookie);
+    const defaultThumb = findBetween(text, 'og:image" content="', '"');
+    const logid = findBetween(text, "dp-logid=", "&");
+    const jsToken = findBetween(text, "fn%28%22", "%22%29");
+    const shorturl = extractSurl(finalUrl) || extractSurl(url);
 
-    const files = await listFiles(yunData, cookie);
+    if (!logid || !jsToken || !shorturl) {
+      throw new Error("Could not extract required tokens (logid/jsToken/shorturl)");
+    }
+
+    const files = await fetchList({ jsToken, logid, shorturl }, cookie);
+    if (!files.length) throw new Error("No files in share");
+
+    const idx = Number.parseInt(index, 10) || 0;
+    const file = files[idx];
+    if (!file) throw new Error(`No file at index ${idx}`);
 
     if (action === "meta") {
-      return json(res, 200, { ok: true, data: { files, yunData: { sign: yunData.sign, timestamp: yunData.timestamp, shareid: yunData.shareid, uk: yunData.uk } } });
+      return json(res, 200, {
+        ok: true,
+        data: {
+          count: files.length,
+          files: files.map((f) => ({
+            fs_id: f.fs_id,
+            server_filename: f.server_filename,
+            size: f.size,
+            isdir: f.isdir,
+            dlink: f.dlink
+          })),
+          tokens: { jsToken, logid, shorturl }
+        }
+      });
     }
 
     if (action === "download") {
-      const target = fsIdParam
-        ? files.find((f) => String(f.fs_id) === String(fsIdParam))
-        : files[0];
-      if (!target) throw new Error("File not found in share");
-      const dlink = await getDownloadLink(yunData, cookie, target.fs_id);
-      return json(res, 200, { ok: true, data: { fs_id: target.fs_id, server_filename: target.server_filename, dlink } });
+      const direct = await resolveDirectLink(file.dlink, cookie);
+      return json(res, 200, {
+        ok: true,
+        data: {
+          server_filename: file.server_filename,
+          size: file.size,
+          size_h: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+          dlink: file.dlink,
+          direct_link: direct,
+          thumb: file?.thumbs?.url3 || defaultThumb
+        }
+      });
     }
 
     return json(res, 400, { ok: false, error: "Invalid action" });
