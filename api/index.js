@@ -76,12 +76,19 @@ module.exports = async (req, res) => {
       );
       shareListData = await shareListRes.json();
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:77',message:'share/list response received',data:{hasData:!!shareListData,errno:shareListData?.errno,hasList:!!shareListData?.list,listLength:shareListData?.list?.length,listKeys:shareListData?.list?.[0]?Object.keys(shareListData.list[0]):[],fullResponse:JSON.stringify(shareListData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      console.log('[HYPOTHESIS-A] share/list response:', JSON.stringify({
+        hasData: !!shareListData,
+        errno: shareListData?.errno,
+        hasList: !!shareListData?.list,
+        listLength: shareListData?.list?.length,
+        listKeys: shareListData?.list?.[0] ? Object.keys(shareListData.list[0]) : [],
+        firstItemSample: shareListData?.list?.[0] ? Object.fromEntries(Object.entries(shareListData.list[0]).slice(0, 10)) : null
+      }));
       // #endregion
     } catch (shareErr) {
       console.error('Share list fetch failed:', shareErr.message);
       // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:79',message:'share/list fetch error',data:{error:shareErr.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      console.log('[HYPOTHESIS-A] share/list fetch error:', shareErr.message);
       // #endregion
     }
 
@@ -91,20 +98,34 @@ module.exports = async (req, res) => {
         try {
           let dlink = null;
           // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:85',message:'processing file',data:{fsId:file.fs_id,filename:file.server_filename,fileKeys:Object.keys(file).slice(0,20),hasDlink:!!file.dlink,hasDownloadLink:!!file.download_link,hasUrl:!!file.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+          console.log('[HYPOTHESIS-B] processing file:', JSON.stringify({
+            fsId: file.fs_id,
+            filename: file.server_filename,
+            fileKeys: Object.keys(file).slice(0, 20),
+            hasDlink: !!file.dlink,
+            hasDownloadLink: !!file.download_link,
+            hasUrl: !!file.url,
+            fileSample: Object.fromEntries(Object.entries(file).slice(0, 10))
+          }));
           // #endregion
           
           // Method 1: Try share/list endpoint first (often has download links)
           if (shareListData && shareListData.list && shareListData.list.length > 0) {
             const shareFile = shareListData.list.find(f => f.fs_id === file.fs_id);
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:90',message:'Method 1: checking share/list',data:{foundShareFile:!!shareFile,shareFileKeys:shareFile?Object.keys(shareFile).slice(0,20):[],shareFileDlink:shareFile?.dlink?.substring(0,100),shareFileDownloadLink:shareFile?.download_link?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            console.log('[HYPOTHESIS-A] Method 1 - share/list check:', JSON.stringify({
+              foundShareFile: !!shareFile,
+              shareFileKeys: shareFile ? Object.keys(shareFile).slice(0, 20) : [],
+              shareFileDlink: shareFile?.dlink?.substring(0, 100),
+              shareFileDownloadLink: shareFile?.download_link?.substring(0, 100),
+              shareFileSample: shareFile ? Object.fromEntries(Object.entries(shareFile).slice(0, 10)) : null
+            }));
             // #endregion
             if (shareFile) {
               dlink = shareFile.dlink || shareFile.download_link || shareFile.direct_link || 
                       shareFile.download_url || shareFile.url || null;
               // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:93',message:'Method 1 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              console.log('[HYPOTHESIS-A] Method 1 result - dlink:', dlink?.substring(0, 100) || 'null');
               // #endregion
             }
           }
@@ -114,7 +135,7 @@ module.exports = async (req, res) => {
             dlink = file.dlink || file.download_link || file.direct_link || 
                     file.download_url || file.url || null;
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:102',message:'Method 2 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            console.log('[HYPOTHESIS-B] Method 2 result - dlink:', dlink?.substring(0, 100) || 'null');
             // #endregion
           }
           
@@ -138,7 +159,17 @@ module.exports = async (req, res) => {
               
               const dlData = await dlRes.json();
               // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:121',message:'Method 3: download API response',data:{errno:dlData.errno,errmsg:dlData.errmsg||dlData.error_msg,hasList:!!dlData.list,listLength:dlData.list?.length,listKeys:dlData.list?.[0]?Object.keys(dlData.list[0]).slice(0,15):[],listDlink:dlData.list?.[0]?.dlink?.substring(0,100),hasDlink:!!dlData.dlink,responseKeys:Object.keys(dlData).slice(0,15),fullResponse:JSON.stringify(dlData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+              console.log('[HYPOTHESIS-C] Method 3 - download API response:', JSON.stringify({
+                errno: dlData.errno,
+                errmsg: dlData.errmsg || dlData.error_msg,
+                hasList: !!dlData.list,
+                listLength: dlData.list?.length,
+                listKeys: dlData.list?.[0] ? Object.keys(dlData.list[0]).slice(0, 15) : [],
+                listDlink: dlData.list?.[0]?.dlink?.substring(0, 100),
+                hasDlink: !!dlData.dlink,
+                responseKeys: Object.keys(dlData).slice(0, 15),
+                responseSample: Object.fromEntries(Object.entries(dlData).slice(0, 10))
+              }));
               // #endregion
               
               // Only use this if no error
@@ -150,7 +181,7 @@ module.exports = async (req, res) => {
                   dlink = dlData.dlink;
                 }
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:130',message:'Method 3 result',data:{dlink:dlink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                console.log('[HYPOTHESIS-C] Method 3 result - dlink:', dlink?.substring(0, 100) || 'null');
                 // #endregion
               } else {
                 console.error('Download API error:', dlData.errno, dlData.errmsg || dlData.error_msg);
@@ -178,19 +209,32 @@ module.exports = async (req, res) => {
               const contentType = streamRes.headers.get('content-type') || '';
               const responseText = await streamRes.text();
               // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:148',message:'Method 4: streamdownload raw response',data:{status:streamRes.status,contentType:contentType,isJSON:contentType.includes('json'),responsePreview:responseText.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              console.log('[HYPOTHESIS-D] Method 4 - streamdownload raw response:', JSON.stringify({
+                status: streamRes.status,
+                contentType: contentType,
+                isJSON: contentType.includes('json'),
+                responsePreview: responseText.substring(0, 200)
+              }));
               // #endregion
               let streamData;
               try {
                 streamData = JSON.parse(responseText);
               } catch (parseErr) {
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:154',message:'Method 4: JSON parse failed',data:{error:parseErr.message,responseText:responseText.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                console.log('[HYPOTHESIS-D] Method 4 - JSON parse failed:', JSON.stringify({
+                  error: parseErr.message,
+                  responseText: responseText.substring(0, 500)
+                }));
                 // #endregion
                 throw parseErr;
               }
               // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:157',message:'Method 4: streamdownload parsed',data:{errno:streamData?.errno,hasDlink:!!streamData?.dlink,streamDataKeys:Object.keys(streamData).slice(0,15),fullResponse:JSON.stringify(streamData).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              console.log('[HYPOTHESIS-D] Method 4 - streamdownload parsed:', JSON.stringify({
+                errno: streamData?.errno,
+                hasDlink: !!streamData?.dlink,
+                streamDataKeys: Object.keys(streamData).slice(0, 15),
+                streamDataSample: Object.fromEntries(Object.entries(streamData).slice(0, 10))
+              }));
               // #endregion
               if (streamData.errno === 0 || streamData.errno === undefined) {
                 dlink = streamData.dlink || streamData.url || streamData.stream_url || null;
@@ -198,7 +242,7 @@ module.exports = async (req, res) => {
             } catch (streamErr) {
               console.error('Streamdownload API failed:', streamErr.message);
               // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:162',message:'Method 4: streamdownload error',data:{error:streamErr.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              console.log('[HYPOTHESIS-D] Method 4 - streamdownload error:', streamErr.message);
               // #endregion
             }
           }
@@ -216,7 +260,11 @@ module.exports = async (req, res) => {
             path: file.path
           };
           // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/8d58bba6-f9fc-4abc-b43e-1b6bd01458a7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/index.js:175',message:'Final result for file',data:{filename:result.filename,hasDownloadLink:!!result.downloadLink,downloadLinkPreview:result.downloadLink?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+          console.log('[HYPOTHESIS-E] Final result for file:', JSON.stringify({
+            filename: result.filename,
+            hasDownloadLink: !!result.downloadLink,
+            downloadLinkPreview: result.downloadLink?.substring(0, 100) || 'null'
+          }));
           // #endregion
           return result;
         } catch (err) {
